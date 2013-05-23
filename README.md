@@ -5,7 +5,7 @@ Usage
 
 Here's a sample run:
 
-	# time ./clonedrive /dev/rdisk4 /dev/rdisk5
+	$ sudo ./clonedrive /dev/rdisk4 /dev/rdisk5
 	src drive size: 2000398934016 bytes
 	dst drive size: 2000398934016 bytes
 	cloning 100% (1863.000000 GB of 1863.016685 GB)
