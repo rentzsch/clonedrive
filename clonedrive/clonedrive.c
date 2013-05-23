@@ -219,7 +219,6 @@ int main(int argc, const char *argv[]) {
         struct timeval verifyStart = {0,0};
         
         // Note we only read to srcDriveSize, since that's all we've written.
-        printf("srcDriveSize: %lld\n", srcDriveSize);
         for (uint64_t dstDrivePos = 0; dstDrivePos < srcDriveSize;) {
             {{
                 // Throttle progress reporting to 1/sec.

@@ -11,7 +11,6 @@ Here's a sample run:
 	cloning 100% (1863.000000 GB of 1863.016685 GB)
 	d927a232ea8ff79a1fe62a6cde9035aa53cb528b  /dev/rdisk4
 	verifying written data (it's now safe to unplug the src drive)
-	srcDriveSize: 2000398934016
 	verifying 100% (1863.000000 GB of 1863.016685 GB)
 	d927a232ea8ff79a1fe62a6cde9035aa53cb528b  /dev/rdisk5
 	SUCCESS
