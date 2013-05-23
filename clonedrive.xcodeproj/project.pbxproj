@@ -7,8 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		792307C81736EF4100C7B503 /* main.c in Sources */ = {isa = PBXBuildFile; fileRef = 792307C71736EF4100C7B503 /* main.c */; };
-		792307CA1736EF4100C7B503 /* clonedrive.1 in CopyFiles */ = {isa = PBXBuildFile; fileRef = 792307C91736EF4100C7B503 /* clonedrive.1 */; };
+		792307C81736EF4100C7B503 /* clonedrive.c in Sources */ = {isa = PBXBuildFile; fileRef = 792307C71736EF4100C7B503 /* clonedrive.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -18,7 +17,6 @@
 			dstPath = /usr/share/man/man1/;
 			dstSubfolderSpec = 0;
 			files = (
-				792307CA1736EF4100C7B503 /* clonedrive.1 in CopyFiles */,
 			);
 			runOnlyForDeploymentPostprocessing = 1;
 		};
@@ -26,8 +24,7 @@
 
 /* Begin PBXFileReference section */
 		792307C41736EF4100C7B503 /* clonedrive */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = clonedrive; sourceTree = BUILT_PRODUCTS_DIR; };
-		792307C71736EF4100C7B503 /* main.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = main.c; sourceTree = "<group>"; };
-		792307C91736EF4100C7B503 /* clonedrive.1 */ = {isa = PBXFileReference; lastKnownFileType = text.man; path = clonedrive.1; sourceTree = "<group>"; };
+		792307C71736EF4100C7B503 /* clonedrive.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = clonedrive.c; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -60,8 +57,7 @@
 		792307C61736EF4100C7B503 /* clonedrive */ = {
 			isa = PBXGroup;
 			children = (
-				792307C71736EF4100C7B503 /* main.c */,
-				792307C91736EF4100C7B503 /* clonedrive.1 */,
+				792307C71736EF4100C7B503 /* clonedrive.c */,
 			);
 			path = clonedrive;
 			sourceTree = "<group>";
@@ -117,7 +113,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				792307C81736EF4100C7B503 /* main.c in Sources */,
+				792307C81736EF4100C7B503 /* clonedrive.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -184,6 +180,10 @@
 		792307CE1736EF4100C7B503 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"$(SDKROOT)/usr/lib/system\"",
+				);
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Debug;
@@ -191,6 +191,10 @@
 		792307CF1736EF4100C7B503 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"$(SDKROOT)/usr/lib/system\"",
+				);
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Release;
@@ -214,6 +218,7 @@
 				792307CF1736EF4100C7B503 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
 	};
