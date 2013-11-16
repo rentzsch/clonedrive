@@ -151,7 +151,7 @@ int main(int argc, const char *argv[]) {
                 struct timeval now, delta;
                 gettimeofday(&now, NULL);
                 timersub(&now, &cloneStart, &delta);
-                if (1 || delta.tv_sec >= 1) {
+                if (delta.tv_sec >= 1) {
                     gettimeofday(&cloneStart, NULL);
                     printf("\rcloning %.0f%% (%f GB of %f GB)",
                            ((double)srcDrivePos / (double)srcDriveSize) * 100.0,
