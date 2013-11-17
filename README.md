@@ -34,4 +34,11 @@ I could have used `dd`, but I'm never sure what a good size `bs` argument is. Pi
 
 It also releases the source drive after the copy but before the verification process. That allows me to put my backup drive back into service in half the time that Disk Utility did.
 
-Eventually I want to make clonedrive faster having dual outstanding reads and writes. I'm guessing that will speed things up.
+TODO
+====
+
+- Overlap reading and writing. Should speed things up significantly.
+
+- Read the source drive twice and verify the checksum before commencing with the clone.
+
+	The idea is to verify a repeatable-read before overwriting the destination drive (usually carrying an outdated-but-otherwise-good backup) with a doomed original. Must include an option to disable since it will dramatically increase the time to clone a drive.
