@@ -16,6 +16,7 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include <stdarg.h>
+#include <dispatch/dispatch.h>
 
 #define COMMON_DIGEST_FOR_OPENSSL
 #include <CommonCrypto/CommonDigest.h>
@@ -66,6 +67,96 @@ static void printsha(uint8_t shaDigest[SHA_DIGEST_LENGTH]) {
         printf("%02x", shaDigest[shaByteIndex]);
     }
 }
+
+static void verifysha(const char* path, uint8_t expectedShaDigest[SHA_DIGEST_LENGTH], void (^completion)(bool match))
+{
+    int srcFD;
+    {{
+        const char *srcDrivePath = path;
+        srcFD = open(srcDrivePath, O_RDONLY);
+        if (srcFD == -1) {
+            perror("verifysha open() failed");
+            exit(EXIT_FAILURE);
+        }
+    }}
+    
+    dispatch_queue_t q = dispatch_get_global_queue(0, 0);
+    dispatch_io_t srcChannel = dispatch_io_create(DISPATCH_IO_STREAM, srcFD, q, ^(int error) {
+        if (error) {
+            perror("dispatch_io error");
+            exit(EXIT_FAILURE);
+        }
+        close(srcFD);
+    });
+    
+    uint64_t srcDriveSize = driveSize(srcFD, "verify");
+    
+    SHA_CTX* readShaCtxPtr = malloc(sizeof(SHA_CTX));
+    SHA1_Init(readShaCtxPtr);
+    
+    __block uint64_t srcDrivePos = 0;
+    __block struct timeval verifyStart = {0,0};
+    
+    dispatch_io_read(srcChannel, 0, SIZE_MAX, q, ^(bool done, dispatch_data_t data, int error) {
+        bool close = false;
+        if (error) {
+            fprintf(stderr, "Error: %s", strerror(error));
+            close = true;
+        }
+        
+        {{
+            // Throttle progress reporting to 1/sec.
+            struct timeval now, delta;
+            gettimeofday(&now, NULL);
+            timersub(&now, &verifyStart, &delta);
+            if (delta.tv_sec >= 1) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    gettimeofday(&verifyStart, NULL);
+                    printf("\rverifying %.0f%% (%f GB of %f GB)",
+                           ((double)srcDrivePos / (double)srcDriveSize) * 100.0,
+                           ((double)srcDrivePos) / kGB,
+                           ((double)srcDriveSize) / kGB);
+                    fflush(stdout);
+                });
+            }
+        }}
+        
+        const size_t rxd = data ? dispatch_data_get_size(data) : 0;
+        
+        if (rxd) {
+            dispatch_data_apply(data, ^bool(dispatch_data_t region, size_t offset, const void *buffer, size_t size) {
+                SHA1_Update(readShaCtxPtr, buffer, size);
+                return true;
+            });
+            srcDrivePos += rxd;
+        }
+        else {
+            close = true;
+        }
+        
+        if (close) {
+            dispatch_io_close(srcChannel, 0);
+            dispatch_release(srcChannel);
+            
+            uint8_t readBackShaDigest[SHA_DIGEST_LENGTH];
+            SHA1_Final(readBackShaDigest, readShaCtxPtr);
+            
+            free(readShaCtxPtr);
+            
+            printf("\n");
+            printsha(readBackShaDigest);
+            printf("  %s\n", path);
+            
+            if (bcmp(expectedShaDigest, readBackShaDigest, SHA_DIGEST_LENGTH) == 0) {
+                completion(true);
+            } else {
+                completion(false);
+            }
+        }
+    });
+}
+
+
 
 int main(int argc, const char *argv[]) {
     //
@@ -129,151 +220,144 @@ int main(int argc, const char *argv[]) {
     }
     
     //
-    // Allocate the buffer we'll be reusing.
+    // Setup dispatch_io channels
     //
     
-    uint8_t *buffer = malloc(kBufferSize);
+    dispatch_group_t waiter = dispatch_group_create();
+    dispatch_group_enter(waiter); // to prevent races
+    dispatch_group_enter(waiter); // for read channel
+    dispatch_group_enter(waiter); // for write channel
+
+    dispatch_queue_t q = dispatch_get_global_queue(0, 0);
+    dispatch_io_t srcChannel = dispatch_io_create(DISPATCH_IO_STREAM, srcFD, q, ^(int error) {
+        if (error) {
+            perror("dispatch_io error");
+            exit(EXIT_FAILURE);
+        }
+        close(srcFD);
+        dispatch_group_leave(waiter);
+
+    });
+    
+    dispatch_io_t dstChannel = dispatch_io_create(DISPATCH_IO_STREAM, dstFD, q, ^(int error) {
+        if (error) {
+            perror("dispatch_io error");
+            exit(EXIT_FAILURE);
+        }
+        close(dstFD);
+        dispatch_group_leave(waiter);
+    });
+    
+    dispatch_io_set_low_water(srcChannel, kBufferSize >> 2);
+    dispatch_io_set_high_water(srcChannel, kBufferSize);
     
     //
     // Copy data from src to dst.
     //
     
-    uint8_t readShaDigest[SHA_DIGEST_LENGTH];
+    uint8_t _readShaDigest[SHA_DIGEST_LENGTH];
+    uint8_t* readShaDigest = _readShaDigest;
     {{
         SHA_CTX readShaCtx;
+        SHA_CTX* const readShaCtxPtr = &readShaCtx;
         SHA1_Init(&readShaCtx);
         
-        struct timeval cloneStart = {0, 0};
+        __block struct timeval cloneStart = {0, 0};
+        __block uint64_t srcDrivePos = 0;
         
-        for (uint64_t srcDrivePos = 0; srcDrivePos < srcDriveSize;) {
+        
+        dispatch_io_read(srcChannel, 0, SIZE_MAX, q, ^(bool done, dispatch_data_t data, int error) {
+            bool close = false;
+            if (error) {
+                fprintf(stderr, "Error: %s", strerror(error));
+                close = true;
+            }
+            
             {{
                 // Throttle progress reporting to 1/sec.
                 struct timeval now, delta;
                 gettimeofday(&now, NULL);
                 timersub(&now, &cloneStart, &delta);
                 if (delta.tv_sec >= 1) {
-                    gettimeofday(&cloneStart, NULL);
-                    printf("\rcloning %.0f%% (%f GB of %f GB)",
-                           ((double)srcDrivePos / (double)srcDriveSize) * 100.0,
-                           ((double)srcDrivePos) / kGB,
-                           ((double)srcDriveSize) / kGB);
-                    fflush(stdout);
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        gettimeofday(&cloneStart, NULL);
+                        printf("\rcloning %.0f%% (%f GB of %f GB)",
+                               ((double)srcDrivePos / (double)srcDriveSize) * 100.0,
+                               ((double)srcDrivePos) / kGB,
+                               ((double)srcDriveSize) / kGB);
+                        fflush(stdout);
+                    });
                 }
             }}
             
-            size_t readSize = kBufferSize;
-            {{
-                uint64_t srcSizeLeft = srcDriveSize - srcDrivePos;
-                if (srcSizeLeft < kBufferSize) {
-                    readSize = srcSizeLeft;
+            dispatch_data_apply(data, ^bool(dispatch_data_t region, size_t offset, const void *buffer, size_t size) {
+                SHA1_Update(readShaCtxPtr, buffer, size);
+                return true;
+            });
+            
+            const size_t rxd = data ? dispatch_data_get_size(data) : 0;
+            
+            if (rxd) {
+                dispatch_io_write(dstChannel, 0, data, q, ^(bool done, dispatch_data_t data, int error) {
+                    bool close = false;
+                    if (error) {
+                        fprintf(stderr, "Error: %s", strerror(error));
+                        close = true;
+                    }
+                    if (close) {
+                        dispatch_io_close(dstChannel, DISPATCH_IO_STOP);
+                        dispatch_release(dstChannel);
+                    }
+                    
+                });
+                srcDrivePos += rxd;
+            }
+            else {
+                close = true;
+            }
+            
+            if (close) {
+                dispatch_io_close(srcChannel, DISPATCH_IO_STOP);
+                dispatch_release(srcChannel);
+                
+                dispatch_io_close(dstChannel, 0);
+                dispatch_release(dstChannel);
+            }
+        });
+        
+        //
+        // Copy is done. Kick off verify.
+        //
+        
+        dispatch_group_notify(waiter, dispatch_get_main_queue(), ^{
+            SHA1_Final(readShaDigest, readShaCtxPtr);
+            printf("\n");
+            printsha(readShaDigest);
+            printf("  %s\n", srcPath);
+            
+            //
+            // Verify clone by reading back the written data.
+            //
+            
+            printf("verifying written data (it's now safe to unplug the src drive)\n");
+            
+            verifysha(dstPath, readShaDigest, ^(bool match) {
+                if (match) {
+                    printf("SUCCESS\n");
+                    exit(EXIT_SUCCESS);
+                } else {
+                    exit(EXIT_FAILURE);
+                    printf("FAILURE\n");
                 }
-            }}
+            });
             
-            if (read(srcFD, buffer, readSize) == -1) {
-                perror("src read() failed");
-                exit(EXIT_FAILURE);
-            }
-            
-            SHA1_Update(&readShaCtx, buffer, readSize);
-            
-            if (write(dstFD, buffer, readSize) == -1) {
-                perror("dst write() failed");
-                exit(EXIT_FAILURE);
-            }
-            
-            srcDrivePos += readSize;
-        }
+        });
         
-        //
-        // Calc the final src checksum.
-        //
+        dispatch_group_leave(waiter); // to prevent races
         
-        SHA1_Final(readShaDigest, &readShaCtx);
-        printf("\n");
-        printsha(readShaDigest);
-        printf("  %s\n", srcPath);
+        dispatch_main(); // never returns
         
-        //
-        // Close src -- we're done here.
-        //
-        
-        close(srcFD);
-        srcFD = -1;
     }}
     
-    //
-    // Verify clone by reading back the written data.
-    //
-    
-    {{
-        printf("verifying written data (it's now safe to unplug the src drive)\n");
-        
-        if (lseek(dstFD, 0LL, SEEK_SET) != 0LL) {
-            perror("dst lseek() failed");
-            exit(EXIT_FAILURE);
-        }
-        
-        SHA_CTX readBackShaCtx;
-        SHA1_Init(&readBackShaCtx);
-        
-        struct timeval verifyStart = {0,0};
-        
-        // Note we only read to srcDriveSize, since that's all we've written.
-        for (uint64_t dstDrivePos = 0; dstDrivePos < srcDriveSize;) {
-            {{
-                // Throttle progress reporting to 1/sec.
-                struct timeval now, delta;
-                gettimeofday(&now, NULL);
-                timersub(&now, &verifyStart, &delta);
-                if (delta.tv_sec >= 1) {
-                    gettimeofday(&verifyStart, NULL);
-                    printf("\rverifying %.0f%% (%f GB of %f GB)",
-                           ((double)dstDrivePos / (double)srcDriveSize) * 100.0,
-                           ((double)dstDrivePos) / kGB,
-                           ((double)srcDriveSize) / kGB);
-                    fflush(stdout);
-                }
-            }}
-            
-            size_t readSize = kBufferSize;
-            {{
-                uint64_t dstSizeLeft = srcDriveSize - dstDrivePos;
-                if (dstSizeLeft < kBufferSize) {
-                    readSize = dstSizeLeft;
-                }
-            }}
-            
-            if (read(dstFD, buffer, readSize) == -1) {
-                perror("dst read() failed");
-                exit(EXIT_FAILURE);
-            }
-            
-            SHA1_Update(&readBackShaCtx, buffer, readSize);
-            
-            dstDrivePos += readSize;
-        }
-        
-        //--
-        
-        uint8_t readBackShaDigest[SHA_DIGEST_LENGTH];
-        SHA1_Final(readBackShaDigest, &readBackShaCtx);
-        printf("\n");
-        printsha(readBackShaDigest);
-        printf("  %s\n", dstPath);
-        
-        if (bcmp(readShaDigest, readBackShaDigest, SHA_DIGEST_LENGTH) == 0) {
-            printf("SUCCESS\n");
-        } else {
-            printf("FAILURE\n");
-        }
-        
-        //--
-        
-        close(dstFD);
-        dstFD = -1;
-    }}
-    
-    free(buffer);
-    
-    return 0;
+    return EXIT_SUCCESS;
 }
