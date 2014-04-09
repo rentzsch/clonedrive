@@ -1,4 +1,4 @@
-// clonedrive.c 1.1
+// clonedrive.c 1.1.1
 //   Copyright (c) 2013-2014 Jonathan 'Wolf' Rentzsch: http://rentzsch.com
 //   Some rights reserved: http://opensource.org/licenses/mit
 //   https://github.com/rentzsch/clonedrive
@@ -264,6 +264,11 @@ int main(int argc, const char *argv[]) {
     
     uint8_t readShaDigest[SHA_DIGEST_LENGTH];
     {{
+        if (lseek(srcFD, 0LL, SEEK_SET) != 0LL) {
+            perror("src drive lseek() failed");
+            exit(EXIT_FAILURE);
+        }
+        
         SHA_CTX readShaCtx;
         SHA1_Init(&readShaCtx);
         
