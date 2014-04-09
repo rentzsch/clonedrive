@@ -62,6 +62,10 @@ TODO
 Version History
 ---------------
 
+### v1.1.1: Apr 08 2014
+
+- [FIX] Seek to position 0 on source drive before starting cloning in case previous code left the position somewhere else. ([rentzsch](https://github.com/rentzsch/clonedrive/commit/60c2a6215bb0058286f52e8739bd5f103d33a1d4))
+
 ### v1.1: Apr 08 2014
 
 - [NEW] Implement Repeatable Read verification.
