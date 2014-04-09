@@ -1,5 +1,7 @@
 Usage
-=====
+-----
+
+Chances are you need to use sudo. clonedrive's first argument is the source drive, the second argument the destination drive:
 
 `sudo ./clonedrive /dev/rdisk8 /dev/rdisk9`
 
@@ -8,17 +10,18 @@ Here's a sample run:
 	$ sudo ./clonedrive /dev/rdisk4 /dev/rdisk5
 	src drive size: 2000398934016 bytes
 	dst drive size: 2000398934016 bytes
-	cloning 100% (1863.000000 GB of 1863.016685 GB)
-	d927a232ea8ff79a1fe62a6cde9035aa53cb528b  /dev/rdisk4
+	initial read of src drive 100% (1863.016685 GB of 1863.016685 GB)
+	verifying repeatable read of src drive 100% (1863.016685 GB of 1863.016685 GB)
+	repeatable read of src drive successful
+	cloning 100% (1863.016685 GB of 1863.016685 GB)
 	verifying written data (it's now safe to unplug the src drive)
-	verifying 100% (1863.000000 GB of 1863.016685 GB)
-	d927a232ea8ff79a1fe62a6cde9035aa53cb528b  /dev/rdisk5
+	verifying write 100% (1863.016685 GB of 1863.016685 GB)
 	SUCCESS
 
 Why?
-====
+----
 
-I backup my MacBook Air to an external FireWire HDD Toaster.
+I backup my MacBook Air to an external portable USB drive.
 
 It houses two partitions: a SuperDuper partition and a Time Machine partition. Both are encrypted.
 
@@ -30,15 +33,43 @@ So I've given up on Disk Utility. Again. And finally wrote my own drive cloner.
 
 I could have used `dd`, but I'm never sure what a good size `bs` argument is. Pick a small one and performance is garbage, pick a big one and I'm unsure what happens to that last remainder block that doesn't fit.
 
-`clonedrive` does the right thing, currently 512MB at time.
+clonedrive does the right thing, currently 512MB at time.
 
-It also releases the source drive after the copy but before the verification process. That allows me to put my backup drive back into service in half the time that Disk Utility did.
+It also releases the source drive after the copy but before the verification process. That allows me to put my backup drive back into service faster.
+
+Repeatable Read Verification
+----------------------------
+
+Like many of us, with age clonedrive has grown paranoid.
+
+clonedrive now verifies the source drive *before* overwriting the destination drive. The common case is that the destination drive already contains an outdated-but-valid backup, and it would be a Bad Thing if that valid backup was corrupted simply because the source has started to die.
+
+clonedrive stresses drives since it reads or writes every. single. block. I/O errors that wouldn't have shown up under normal spare FS access patterns can surface with clonedrive and tools of its ilk.
+
+So the idea is to probe the source drive for issues before it can take out a valid backup. clonedrive does this by reading the entire source drive twice before starting to overwrite the destination drive.
+
+Reading the source drive once ensures we can actually read every block on it. Reading it twice and comparing checksums increases the odds the drive and I/O subsystem is actually capable and isn't lying to us.
+
+Once Repeatable Read Verification passes, cloning commences. But a third checksum is produced by the clone itself, so that's checked as well. If that doesn't match, then we know the data changed while in flight. Which is Bad, and probably indicates an dying source drive or I/O subsystem issue. Or just a cosmic ray.
+
+Easter Egg: if you don't specify the destination drive, clonedrive will only perform Repeatable Read Verification on the specified drive. Think of it as Poor Man's [Stressdrive](https://github.com/rentzsch/stressdrive).
 
 TODO
-====
+----
 
-- Overlap reading and writing. Should speed things up significantly.
+- Overlap reading and writing when cloning. Should speed things up significantly. The problem is that it seems to dramatically complicate the code, which I'm not willing to do just yet. clonedrive is meant to be a refuge of simple functionality for the paranoid. There's a reason it's written in straight-up C.
 
-- Read the source drive twice and verify the checksum before commencing with the clone.
+Version History
+---------------
 
-	The idea is to verify a repeatable-read before overwriting the destination drive (usually carrying an outdated-but-otherwise-good backup) with a doomed original. Must include an option to disable since it will dramatically increase the time to clone a drive.
+### v1.1: Apr 08 2014
+
+- [NEW] Implement Repeatable Read verification.
+
+### v1.0.1: Nov 16 2013
+
+- [FIX] Remove progress-report debug code. ([rentzsch](https://github.com/rentzsch/clonedrive/commit/b87e53f4b11731dc6c225704fe7d546e359d6124))
+
+### v1.0: May 23 2013
+
+- Initial release.
