@@ -40,7 +40,7 @@ It also releases the source drive after the copy but before the verification pro
 Repeatable Read Verification
 ----------------------------
 
-Like many of us, with age clonedrive has grown paranoid.
+Like many of us, clonedrive has grown paranoid with age.
 
 clonedrive now verifies the source drive *before* overwriting the destination drive. The common case is that the destination drive already contains an outdated-but-valid backup, and it would be a Bad Thing if that valid backup was corrupted simply because the source has started to die.
 
