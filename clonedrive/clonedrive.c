@@ -1,4 +1,4 @@
-// clonedrive.c 1.1.1
+// clonedrive.c 1.2
 //   Copyright (c) 2013-2014 Jonathan 'Wolf' Rentzsch: http://rentzsch.com
 //   Some rights reserved: http://opensource.org/licenses/mit
 //   https://github.com/rentzsch/clonedrive
@@ -16,6 +16,7 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include <stdarg.h>
+#include <stdbool.h>
 
 #define COMMON_DIGEST_FOR_OPENSSL
 #include <CommonCrypto/CommonDigest.h>
@@ -128,19 +129,60 @@ static void readDriveSha(int fd,
 }
 
 int main(int argc, const char *argv[]) {
+    bool performRepeatableRead = true;
+    bool performClone = false;
+    
     //
     // Verify args.
     //
     
-    if (argc != 2 && argc != 3) {
+    if (argc < 2 || argc > 4) {
+        fprintf(stderr, "clonedrive 1.2\n");
         fprintf(stderr, "Usage: sudo %s /dev/rdisk8 /dev/rdisk9\n", argv[0]);
+        fprintf(stderr,
+                "Usage: sudo %s --no-repeatable-read /dev/rdisk8 /dev/rdisk9\n",
+                argv[0]);
+        fprintf(stderr,
+                "Usage: sudo %s -norr /dev/rdisk8 /dev/rdisk9\n",
+                argv[0]);
+        fprintf(stderr,
+                "Usage: sudo %s /dev/rdisk9\n",
+                argv[0]);
+        exit(EXIT_FAILURE);
+    }
+        
+    //
+    // Process args.
+    //
+    
+    const char *srcPath = NULL;
+    const char *dstPath = NULL;
+    
+    for (int argIndex = 1; argIndex < argc; argIndex++) {
+        const char *arg = argv[argIndex];
+        if (strcmp(arg, "--no-repeatable-read") == 0
+            || strcmp(arg, "-norr") == 0)
+        {
+            performRepeatableRead = false;
+        } else {
+            if (!srcPath) {
+                srcPath = arg;
+            } else if (!dstPath) {
+                dstPath = arg;
+                performClone = true;
+            } else {
+                fprintf(stderr, "Error: too many arguments\n");
+                exit(EXIT_FAILURE);
+            }
+        }
+    }
+    
+    if (srcPath == NULL) {
+        fprintf(stderr, "Error: no drives specified\n");
         exit(EXIT_FAILURE);
     }
     
-    const char *srcPath = argv[1];
-    const char *dstPath = argc == 2 ? NULL : argv[2];
-    
-    if (dstPath) {
+    if (performClone) {
         if (strcmp(srcPath, dstPath) == 0) {
             fprintf(stderr, "destination must be different from source\n");
             exit(EXIT_FAILURE);
@@ -165,21 +207,26 @@ int main(int argc, const char *argv[]) {
     
     //
     // Open dst read-only to ensure it's big enough.
+    // 
+    // We test here to fail-fast and not have to go through an entire
+    // Repeatable Read verification before informing the user the
+    // destination drive isn't adequate.
     //
     
     int dstFD = -1;
-    if (dstPath) {
+    if (performClone) {
         dstFD = open(dstPath, O_RDONLY);
         if (dstFD == -1) {
             perror("dst drive open(O_RDONLY) failed");
             exit(EXIT_FAILURE);
         }
-        uint64_t dstDriveSize = driveSize(dstFD, "dst drive");
-        printf("dst drive size: %llu bytes\n", dstDriveSize);
         
         //
         // Make sure it fits.
         //
+        
+        uint64_t dstDriveSize = driveSize(dstFD, "dst drive");
+        printf("dst drive size: %llu bytes\n", dstDriveSize);
         
         if (srcDriveSize > dstDriveSize) {
             fprintf(stderr, "can't clone: src drive is bigger than dst drive");
@@ -188,207 +235,212 @@ int main(int argc, const char *argv[]) {
     }
     
     //
-    // Allocate one big reusable buffer.
+    // Allocate one big reusable buffer for everything.
     //
     
     uint8_t *buffer = malloc(kBufferSize);
     
-    //
-    // Repeatable Read: First src read.
+    //-----------------------------------------------------------------------------------------
+    // Repeatable Read Implementation.
     //
     
     uint8_t srcFirstDigest[SHA_DIGEST_LENGTH];
-    readDriveSha(srcFD,
-                 "src drive",
-                 srcDriveSize,
-                 buffer,
-                 "initial read of src drive",
-                 srcFirstDigest);
-    
-    //
-    // Repeatable Read: Second src read.
-    //
-    
-    uint8_t srcSecondDigest[SHA_DIGEST_LENGTH];
-    readDriveSha(srcFD,
-                 "src drive",
-                 srcDriveSize,
-                 buffer,
-                 "verifying repeatable read of src drive",
-                 srcSecondDigest);
-    
-    //
-    // Repeatable Read: Ensure we read the same data twice in a row.
-    //
-    
-    if (bcmp(srcFirstDigest, srcSecondDigest, SHA_DIGEST_LENGTH) == 0) {
-        printf("repeatable read of src drive successful\n");
-    } else {
-        printf("FAILURE couldn't repeatedly read src drive\n");
-        
-        printf("first read:  ");
-        printSha(srcFirstDigest);
-        printf("\n");
-        
-        printf("second read: ");
-        printSha(srcSecondDigest);
-        printf("\n");
-        
-        exit(EXIT_FAILURE);
-    }
-    
-    if (!dstPath) {
-        // Just a repeatable read. Our work here is done.
-        goto cleanup;
-    }
-    
-    //
-    // Re-open dst (read-write).
-    //
-    
-    {{
-        if (close(dstFD) == -1) {
-            perror("dst close() failed");
-            exit(EXIT_FAILURE);
-        }
-        dstFD = open(dstPath, O_RDWR);
-        if (dstFD == -1) {
-            perror("dst open(O_RDWR) failed");
-            exit(EXIT_FAILURE);
-        }
-    }}
-    
-    //
-    // Copy data from src to dst.
-    //
-    
-    uint8_t readShaDigest[SHA_DIGEST_LENGTH];
-    {{
-        if (lseek(srcFD, 0LL, SEEK_SET) != 0LL) {
-            perror("src drive lseek() failed");
-            exit(EXIT_FAILURE);
-        }
-        
-        SHA_CTX readShaCtx;
-        SHA1_Init(&readShaCtx);
-        
-        struct timeval cloneStart = {0, 0};
-        
-        for (uint64_t srcDrivePos = 0; srcDrivePos < srcDriveSize;) {
-            {{
-                // Throttle progress reporting to 1/sec.
-                struct timeval now, delta;
-                gettimeofday(&now, NULL);
-                timersub(&now, &cloneStart, &delta);
-                if (delta.tv_sec >= 1) {
-                    gettimeofday(&cloneStart, NULL);
-                    printf("\rcloning %.0f%% (%f GB of %f GB)",
-                           ((double)srcDrivePos / (double)srcDriveSize) * 100.0,
-                           ((double)srcDrivePos) / kGB,
-                           ((double)srcDriveSize) / kGB);
-                    fflush(stdout);
-                }
-            }}
-            
-            size_t readSize = kBufferSize;
-            {{
-                uint64_t srcSizeLeft = srcDriveSize - srcDrivePos;
-                if (srcSizeLeft < kBufferSize) {
-                    readSize = srcSizeLeft;
-                }
-            }}
-            
-            if (read(srcFD, buffer, readSize) == -1) {
-                perror("src read() failed");
-                exit(EXIT_FAILURE);
-            }
-            
-            SHA1_Update(&readShaCtx, buffer, readSize);
-            
-            if (write(dstFD, buffer, readSize) == -1) {
-                perror("dst write() failed");
-                exit(EXIT_FAILURE);
-            }
-            
-            srcDrivePos += readSize;
-        }
-        
-        printf("\rcloning 100%% (%f GB of %f GB)\n",
-               ((double)srcDriveSize) / kGB,
-               ((double)srcDriveSize) / kGB);
-        
+    if (performRepeatableRead) {
         //
-        // Calc the final src checksum.
+        // Repeatable Read: First src read.
         //
         
-        SHA1_Final(readShaDigest, &readShaCtx);
-    }}
-    
-    //
-    // Double-check the data didn't change during the copy itself.
-    //
-    
-    if (bcmp(srcSecondDigest,readShaDigest, SHA_DIGEST_LENGTH) != 0) {
-        printf("FAILURE src data changed during copy\n");
-        
-        printf("first & second reads: ");
-        printSha(srcSecondDigest);
-        printf("\n");
-        
-        printf("read during copy:     ");
-        printSha(readShaDigest);
-        printf("\n");
-        
-        exit(EXIT_FAILURE);
-    }
-    
-    //
-    // Re-open dst read-only for verification.
-    //
-    
-    {{
-        if (close(dstFD) == -1) {
-            perror("dst close() failed");
-            exit(EXIT_FAILURE);
-        }
-        dstFD = open(dstPath, O_RDONLY);
-        if (dstFD == -1) {
-            perror("dst open(O_RDONLY) failed");
-            exit(EXIT_FAILURE);
-        }
-    }}
-    
-    //
-    // Verify clone by reading back the written data.
-    //
-    
-    {{
-        printf("verifying written data (it's now safe to unplug the src drive)\n");
-        
-        uint8_t readBackShaDigest[SHA_DIGEST_LENGTH];
-        readDriveSha(dstFD,
-                     "dst drive",
-                     srcDriveSize, // Only read to srcDriveSize, since that's all we've written.
+        readDriveSha(srcFD,
+                     "src drive",
+                     srcDriveSize,
                      buffer,
-                     "verifying write",
-                     readBackShaDigest);
+                     "initial read of src drive",
+                     srcFirstDigest);
         
-        if (bcmp(readShaDigest, readBackShaDigest, SHA_DIGEST_LENGTH) == 0) {
-            printf("SUCCESS\n");
+        //
+        // Repeatable Read: Second src read.
+        //
+        
+        uint8_t srcSecondDigest[SHA_DIGEST_LENGTH];
+        readDriveSha(srcFD,
+                     "src drive",
+                     srcDriveSize,
+                     buffer,
+                     "verifying repeatable read of src drive",
+                     srcSecondDigest);
+        
+        //
+        // Repeatable Read: Ensure we read the same data twice in a row.
+        //
+        
+        if (bcmp(srcFirstDigest, srcSecondDigest, SHA_DIGEST_LENGTH) == 0) {
+            printf("repeatable read of src drive successful\n");
         } else {
-            printf("FAILURE\n");
+            printf("FAILURE couldn't repeatedly read src drive\n");
             
-            printf("src read:      ");
+            printf("first read:  ");
+            printSha(srcFirstDigest);
+            printf("\n");
+            
+            printf("second read: ");
+            printSha(srcSecondDigest);
+            printf("\n");
+            
+            exit(EXIT_FAILURE);
+        }
+    }
+    
+    //-----------------------------------------------------------------------------------------
+    // Cloning Implementation
+    //
+    
+    if (performClone) {
+        //
+        // Re-open dst (read-write).
+        //
+        
+        {{
+            if (close(dstFD) == -1) {
+                perror("dst close() failed");
+                exit(EXIT_FAILURE);
+            }
+            dstFD = open(dstPath, O_RDWR);
+            if (dstFD == -1) {
+                perror("dst open(O_RDWR) failed");
+                exit(EXIT_FAILURE);
+            }
+        }}
+        
+        //
+        // Copy data from src to dst.
+        //
+        
+        uint8_t readShaDigest[SHA_DIGEST_LENGTH];
+        {{
+            if (lseek(srcFD, 0LL, SEEK_SET) != 0LL) {
+                perror("src drive lseek() failed");
+                exit(EXIT_FAILURE);
+            }
+            
+            SHA_CTX readShaCtx;
+            SHA1_Init(&readShaCtx);
+            
+            struct timeval cloneStart = {0, 0};
+            
+            for (uint64_t srcDrivePos = 0; srcDrivePos < srcDriveSize;) {
+                {{
+                    // Throttle progress reporting to 1/sec.
+                    struct timeval now, delta;
+                    gettimeofday(&now, NULL);
+                    timersub(&now, &cloneStart, &delta);
+                    if (delta.tv_sec >= 1) {
+                        gettimeofday(&cloneStart, NULL);
+                        printf("\rcloning %.0f%% (%f GB of %f GB)",
+                               ((double)srcDrivePos / (double)srcDriveSize) * 100.0,
+                               ((double)srcDrivePos) / kGB,
+                               ((double)srcDriveSize) / kGB);
+                        fflush(stdout);
+                    }
+                }}
+                
+                size_t readSize = kBufferSize;
+                {{
+                    uint64_t srcSizeLeft = srcDriveSize - srcDrivePos;
+                    if (srcSizeLeft < kBufferSize) {
+                        readSize = srcSizeLeft;
+                    }
+                }}
+                
+                if (read(srcFD, buffer, readSize) == -1) {
+                    perror("src read() failed");
+                    exit(EXIT_FAILURE);
+                }
+                
+                SHA1_Update(&readShaCtx, buffer, readSize);
+                
+                if (write(dstFD, buffer, readSize) == -1) {
+                    perror("dst write() failed");
+                    exit(EXIT_FAILURE);
+                }
+                
+                srcDrivePos += readSize;
+            }
+            
+            printf("\rcloning 100%% (%f GB of %f GB)\n",
+                   ((double)srcDriveSize) / kGB,
+                   ((double)srcDriveSize) / kGB);
+            
+            //
+            // Calc the final src checksum.
+            //
+            
+            SHA1_Final(readShaDigest, &readShaCtx);
+        }}
+        
+        //
+        // Double-check the data didn't change during the copy itself.
+        //
+        
+        if (performRepeatableRead
+            && bcmp(srcFirstDigest,readShaDigest, SHA_DIGEST_LENGTH) != 0)
+        {
+            printf("FAILURE src data changed during copy\n");
+            
+            printf("first & second reads: ");
+            printSha(srcFirstDigest);
+            printf("\n");
+            
+            printf("read during copy:     ");
             printSha(readShaDigest);
             printf("\n");
             
-            printf("dst read back: ");
-            printSha(readBackShaDigest);
-            printf("\n");
+            exit(EXIT_FAILURE);
         }
-    }}
-    
-cleanup:
+        
+        //
+        // Re-open dst read-only for verification.
+        //
+        
+        {{
+            if (close(dstFD) == -1) {
+                perror("dst close() failed");
+                exit(EXIT_FAILURE);
+            }
+            dstFD = open(dstPath, O_RDONLY);
+            if (dstFD == -1) {
+                perror("dst open(O_RDONLY) failed");
+                exit(EXIT_FAILURE);
+            }
+        }}
+        
+        //
+        // Verify clone by reading back the written data.
+        //
+        
+        {{
+            printf("verifying written data (it's now safe to unplug the src drive)\n");
+            
+            uint8_t readBackShaDigest[SHA_DIGEST_LENGTH];
+            readDriveSha(dstFD,
+                         "dst drive",
+                         srcDriveSize, // Only read to srcDriveSize, since that's all we've written.
+                         buffer,
+                         "verifying write",
+                         readBackShaDigest);
+            
+            if (bcmp(readShaDigest, readBackShaDigest, SHA_DIGEST_LENGTH) != 0) {
+                printf("FAILURE cloning\n");
+                
+                printf("src read:      ");
+                printSha(readShaDigest);
+                printf("\n");
+                
+                printf("dst read back: ");
+                printSha(readBackShaDigest);
+                printf("\n");
+            }
+        }}
+    }
     
     //
     // Free our buffer.
@@ -420,5 +472,6 @@ cleanup:
         srcFD = -1;
     }
     
+    printf("SUCCESS\n");
     return 0;
 }

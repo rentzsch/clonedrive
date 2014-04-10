@@ -62,6 +62,12 @@ TODO
 Version History
 ---------------
 
+### v1.2: Apr 10 2014
+
+- [NEW] `--no-repeatable-read` (short form: `-norr`) option to disable Repeatable Read Verification, which is take a long time. Repeatable Read Verification remains on by default.
+- [NEW] Running clonedrive with no arguments now reports its version number.
+- [DEV] Better structure to argument processing, removes sole use of goto.
+
 ### v1.1.1: Apr 08 2014
 
 - [FIX] Seek to position 0 on source drive before starting cloning in case previous code left the position somewhere else. ([rentzsch](https://github.com/rentzsch/clonedrive/commit/60c2a6215bb0058286f52e8739bd5f103d33a1d4))
