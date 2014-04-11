@@ -418,6 +418,18 @@ int main(int argc, const char *argv[]) {
         //
         
         {{
+            //
+            // Close src.
+            //
+            
+            if (srcFD != -1) {
+                if (close(srcFD) == -1) {
+                    perror("src close() failed");
+                    exit(EXIT_FAILURE);
+                }
+                srcFD = -1;
+            }
+            
             printf("verifying written data (it's now safe to unplug the src drive)\n");
             
             uint8_t readBackShaDigest[SHA_DIGEST_LENGTH];
