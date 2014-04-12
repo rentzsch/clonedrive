@@ -62,6 +62,10 @@ TODO
 Version History
 ---------------
 
+### v1.2.2: Apr 12 2014
+
+- [FIX] Forgot to exit with failure after clone verify.
+
 ### v1.2.1: Apr 11 2014
 
 - [FIX] Close src drive before Clone Verification. ([rentzsch](https://github.com/rentzsch/clonedrive/commit/27842e80a6feb9535c2f0dc8a07e025d19ee5913))

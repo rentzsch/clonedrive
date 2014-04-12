@@ -1,4 +1,4 @@
-// clonedrive.c 1.2.1
+// clonedrive.c 1.2.2
 //   Copyright (c) 2013-2014 Jonathan 'Wolf' Rentzsch: http://rentzsch.com
 //   Some rights reserved: http://opensource.org/licenses/mit
 //   https://github.com/rentzsch/clonedrive
@@ -137,7 +137,7 @@ int main(int argc, const char *argv[]) {
     //
     
     if (argc < 2 || argc > 4) {
-        fprintf(stderr, "clonedrive 1.2.1\n");
+        fprintf(stderr, "clonedrive 1.2.2\n");
         fprintf(stderr, "Usage: sudo %s /dev/rdisk8 /dev/rdisk9\n", argv[0]);
         fprintf(stderr,
                 "Usage: sudo %s --no-repeatable-read /dev/rdisk8 /dev/rdisk9\n",
