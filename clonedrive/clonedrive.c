@@ -450,6 +450,8 @@ int main(int argc, const char *argv[]) {
                 printf("dst read back: ");
                 printSha(readBackShaDigest);
                 printf("\n");
+                
+                exit(EXIT_FAILURE);
             }
         }}
     }
