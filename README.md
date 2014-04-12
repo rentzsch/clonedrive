@@ -64,7 +64,7 @@ Version History
 
 ### v1.2.2: Apr 12 2014
 
-- [FIX] Forgot to exit with failure after clone verify.
+- [FIX] Exit with failure if clone verification fails. Effect is mostly cosmetic, with SUCCESS reported after FAILURE.
 
 ### v1.2.1: Apr 11 2014
 
